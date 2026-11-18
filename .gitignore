@@ -1,0 +1,3 @@
+# Release packages are built next to this clone (D:\Projects\Xades.Nuget) and published to nuget.org, not to git
+*.nupkg
+*.snupkg

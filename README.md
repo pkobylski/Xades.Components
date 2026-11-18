@@ -47,6 +47,56 @@ signed.Save("document.xades.xml");
 
 `SignXades` returns a **new** document; the input `XmlDocument` is not modified.
 
+## Dependency injection (ASP.NET Core, Worker Service, …)
+
+Register the signer once, with the serial number from configuration or code, and inject `IXadesSigner` wherever
+you sign.
+
+**From `appsettings.json`:**
+
+```json
+{
+  "XadesComponents": {
+    "SerialNumber": "YOUR-SERIAL-NUMBER",
+    "CryptType": "SHA256",
+    "EnvelopeType": "Enveloped"
+  }
+}
+```
+
+```csharp
+builder.Services.AddXadesComponents(builder.Configuration.GetSection(XadesOptions.SectionName));
+```
+
+**Or in code:**
+
+```csharp
+builder.Services.AddXadesComponents(options =>
+{
+    options.SerialNumber = "YOUR-SERIAL-NUMBER";
+    options.CryptType = CryptType.SHA256;          // default
+    options.EnvelopeType = EnvelopeType.Enveloped; // default
+});
+```
+
+**Usage:**
+
+```csharp
+public class DeclarationService
+{
+    private readonly IXadesSigner _signer;
+
+    public DeclarationService(IXadesSigner signer) => _signer = signer;
+
+    public XmlDocument Sign(XmlDocument declaration, X509Certificate2 cert) =>
+        _signer.Sign(declaration, cert);   // CryptType and EnvelopeType from options
+}
+```
+
+`IXadesSigner` is registered as a singleton. An invalid serial number is reported when the signer is first
+resolved from the container (`InvalidOperationException`), not on the first signature. `Sign(document, cert,
+cryptType, envelopeType)` overrides the configured defaults for a single call.
+
 ## Supported modes
 
 | `EnvelopeType` | Input | SHA-1 | SHA-256 | Result |
@@ -76,10 +126,14 @@ File.WriteAllBytes("invoice.pdf.xades", signature);
 
 ## Behaviour worth knowing (Enveloped)
 
-- **Comments are removed** from the signed document. XML signatures never cover comments, and leaving them in
-  made some verifiers reject the signature.
+- **Comments are kept** in the signed document. As required by XMLDSig, the signature does not cover them,
+  so comments can change without invalidating the signature.
 - **Whitespace is preserved.** Load the input with `PreserveWhitespace = true` if its formatting matters to you;
   the returned document can be saved with `Save()` without breaking the signature.
+- **Verifying with .NET `SignedXml`:** it computes the whole-document reference incorrectly when the document
+  contains comments inside the root element and reports such signatures (from any signing tool) as invalid.
+  Java-based verifiers (Apache Santuario) validate them correctly. To verify in .NET, remove the comments
+  and call `Normalize()` on a copy first; this does not change what is signed.
 
 ## Licensing
 
@@ -90,12 +144,21 @@ The library is **not open source**. Without a valid `SerialNumber`:
 
 An invalid `SerialNumber` throws an exception. To obtain a serial number, contact the author.
 
+Serial numbers issued for versions up to 2.0.1 are not accepted by 2.0.2 and later; contact the author for a new one.
+
 ## Changelog
+
+**2.0.4**
+- `services.AddXadesComponents(...)` registers `IXadesSigner` with options from `appsettings.json` or code.
+- Malformed serial numbers are reported as "Serial number is not valid" instead of an internal exception.
+- `System.Security.Cryptography.Xml` updated to 10.0.15 (fixes CVE-2026-96958, CVE-2026-96959, CVE-2026-96960).
+- New dependencies: `Microsoft.Extensions.DependencyInjection.Abstractions` and
+  `Microsoft.Extensions.Options.ConfigurationExtensions` (8.0).
 
 **2.0.3**
 - Certificates with keys in a CNG KSP no longer fail with "Invalid provider type specified".
-- Enveloped: comments in the input document and `XmlDocument.Save()` no longer invalidate the signature;
-  the input document is no longer modified.
+- Enveloped: `XmlDocument.Save()` no longer invalidates the signature when the input was loaded without
+  `PreserveWhitespace`; comments are kept; the input document is no longer modified.
 - Signatures produced by the library can be verified with `SignedXml.CheckSignature()` on .NET 8+.
 
 ## Contact
